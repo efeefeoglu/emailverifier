@@ -1,0 +1,109 @@
+name: Deploy to DreamHost
+
+on:
+  push:
+    branches:
+      - main
+
+  # Allows manual deployment from GitHub Actions
+  workflow_dispatch:
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/dreamhost
+          chmod 600 ~/.ssh/dreamhost
+
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy application
+        env:
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+          SSH_USER: ${{ secrets.DREAMHOST_USER }}
+        run: |
+          ssh \
+            -i ~/.ssh/dreamhost \
+            "$SSH_USER@$SSH_HOST" \
+            'bash -s' << 'EOF'
+
+          set -e
+
+          APP_DIR="$HOME/email-verifier"
+
+          echo "==> Moving to application directory"
+          cd "$APP_DIR"
+
+          echo "==> Updating code"
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "==> Activating Python environment"
+          source venv/bin/activate
+
+          echo "==> Updating dependencies"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+          # Uncomment when Alembic/database migrations are added.
+          # echo "==> Running database migrations"
+          # alembic upgrade head
+
+          echo "==> Restarting services"
+
+          # Needed in some non-interactive SSH sessions
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
+          systemctl --user restart email-verifier-web.service
+          systemctl --user restart email-verifier-worker.service
+
+          echo "==> Checking services"
+          systemctl --user is-active --quiet email-verifier-web.service
+          systemctl --user is-active --quiet email-verifier-worker.service
+
+          echo "==> Deployment completed"
+          EOF
+
+      - name: Health check
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: |
+          echo "Checking $HEALTHCHECK_URL"
+
+          for attempt in {1..10}; do
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 10 \
+              "$HEALTHCHECK_URL"; then
+
+              echo ""
+              echo "Application is healthy."
+              exit 0
+            fi
+
+            echo "Attempt $attempt failed. Retrying..."
+            sleep 5
+          done
+
+          echo "Health check failed."
+          exit 1
