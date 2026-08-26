@@ -47,7 +47,7 @@ jobs:
 
           set -e
 
-          APP_DIR="$HOME/email-verifier"
+          APP_DIR="$HOME/verify.efeefeoglu.com"
 
           echo "==> Moving to application directory"
           cd "$APP_DIR"
