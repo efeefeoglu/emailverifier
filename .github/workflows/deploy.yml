@@ -1,13 +1,132 @@
-name: Validate deployment secrets
-env:
-  SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
-  SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
-  SSH_USER: ${{ secrets.DREAMHOST_USER }}
-run: |
-  [ -n "$SSH_PRIVATE_KEY" ] || { echo "DREAMHOST_SSH_KEY is missing"; exit 1; }
-  [ -n "$SSH_HOST" ] || { echo "DREAMHOST_HOST is missing"; exit 1; }
-  [ -n "$SSH_USER" ] || { echo "DREAMHOST_USER is missing"; exit 1; }
+name: Deploy to DreamHost
 
-  echo "SSH key exists"
-  echo "SSH host exists"
-  echo "SSH user exists"
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+          SSH_USER: ${{ secrets.DREAMHOST_USER }}
+        run: |
+          [ -n "$SSH_PRIVATE_KEY" ] || { echo "DREAMHOST_SSH_KEY is missing"; exit 1; }
+          [ -n "$SSH_HOST" ] || { echo "DREAMHOST_HOST is missing"; exit 1; }
+          [ -n "$SSH_USER" ] || { echo "DREAMHOST_USER is missing"; exit 1; }
+
+          echo "All deployment secrets are available."
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+        run: |
+          set -e
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/dreamhost
+          chmod 600 ~/.ssh/dreamhost
+
+          ssh-keyscan -T 10 -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Test SSH connection
+        env:
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+          SSH_USER: ${{ secrets.DREAMHOST_USER }}
+        run: |
+          ssh \
+            -i ~/.ssh/dreamhost \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            "$SSH_USER@$SSH_HOST" \
+            "echo 'SSH connection successful'; whoami; pwd"
+
+      - name: Deploy application
+        env:
+          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+          SSH_USER: ${{ secrets.DREAMHOST_USER }}
+        run: |
+          ssh \
+            -i ~/.ssh/dreamhost \
+            "$SSH_USER@$SSH_HOST" \
+            'bash -s' << 'EOF'
+
+          set -e
+
+          APP_DIR="$HOME/verify.efeefeoglu.com"
+
+          echo "==> Moving to application directory"
+          cd "$APP_DIR"
+
+          echo "==> Updating code"
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "==> Activating Python environment"
+          source venv/bin/activate
+
+          echo "==> Updating dependencies"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+          # Uncomment when migrations are added.
+          # alembic upgrade head
+
+          echo "==> Restarting services"
+
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
+          systemctl --user restart email-verifier-web.service
+          systemctl --user restart email-verifier-worker.service
+
+          echo "==> Checking services"
+
+          systemctl --user is-active --quiet email-verifier-web.service
+          systemctl --user is-active --quiet email-verifier-worker.service
+
+          echo "==> Deployment completed"
+          EOF
+
+      - name: Health check
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: |
+          echo "Running production health check..."
+
+          for attempt in {1..10}; do
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --max-time 10 \
+              "$HEALTHCHECK_URL"; then
+
+              echo ""
+              echo "Application is healthy."
+              exit 0
+            fi
+
+            echo "Attempt $attempt failed. Retrying in 5 seconds..."
+            sleep 5
+          done
+
+          echo "Health check failed."
+          exit 1
