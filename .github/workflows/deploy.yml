@@ -12,32 +12,17 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy Production
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate deployment secrets
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
-          SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
-          SSH_USER: ${{ secrets.DREAMHOST_USER }}
-        run: |
-          [ -n "$SSH_PRIVATE_KEY" ] || { echo "DREAMHOST_SSH_KEY is missing"; exit 1; }
-          [ -n "$SSH_HOST" ] || { echo "DREAMHOST_HOST is missing"; exit 1; }
-          [ -n "$SSH_USER" ] || { echo "DREAMHOST_USER is missing"; exit 1; }
-
-          echo "All deployment secrets are available."
-
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
           SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
         run: |
-          set -e
-
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
@@ -47,19 +32,24 @@ jobs:
           ssh-keyscan -T 10 -H "$SSH_HOST" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Test SSH connection
+      - name: Upload application
         env:
           SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
           SSH_USER: ${{ secrets.DREAMHOST_USER }}
         run: |
-          ssh \
-            -i ~/.ssh/dreamhost \
-            -o BatchMode=yes \
-            -o ConnectTimeout=10 \
-            "$SSH_USER@$SSH_HOST" \
-            "echo 'SSH connection successful'; whoami; pwd"
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'venv/' \
+            --exclude '.venv/' \
+            --exclude '.env' \
+            --exclude '__pycache__/' \
+            --exclude '*.pyc' \
+            -e "ssh -i ~/.ssh/dreamhost" \
+            ./ \
+            "$SSH_USER@$SSH_HOST:~/verify.efeefeoglu.com/"
 
-      - name: Deploy application
+      - name: Install dependencies and restart
         env:
           SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
           SSH_USER: ${{ secrets.DREAMHOST_USER }}
@@ -73,22 +63,19 @@ jobs:
 
           APP_DIR="$HOME/verify.efeefeoglu.com"
 
-          echo "==> Moving to application directory"
           cd "$APP_DIR"
 
-          echo "==> Updating code"
-          git fetch origin main
-          git reset --hard origin/main
+          echo "==> Setting up Python environment"
 
-          echo "==> Activating Python environment"
+          if [ ! -d "venv" ]; then
+            python3 -m venv venv
+          fi
+
           source venv/bin/activate
 
-          echo "==> Updating dependencies"
+          echo "==> Installing dependencies"
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-          # Uncomment when migrations are added.
-          # alembic upgrade head
 
           echo "==> Restarting services"
 
@@ -99,8 +86,8 @@ jobs:
 
           echo "==> Checking services"
 
-          systemctl --user is-active --quiet email-verifier-web.service
-          systemctl --user is-active --quiet email-verifier-worker.service
+          systemctl --user is-active email-verifier-web.service
+          systemctl --user is-active email-verifier-worker.service
 
           echo "==> Deployment completed"
           EOF
@@ -109,8 +96,6 @@ jobs:
         env:
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
         run: |
-          echo "Running production health check..."
-
           for attempt in {1..10}; do
             if curl \
               --fail \
@@ -124,7 +109,7 @@ jobs:
               exit 0
             fi
 
-            echo "Attempt $attempt failed. Retrying in 5 seconds..."
+            echo "Health check attempt $attempt failed."
             sleep 5
           done
 
