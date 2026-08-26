@@ -18,6 +18,11 @@ def homepage() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.post("/api/verify", response_model=list[EmailResult])
 def verify_emails(request: EmailList) -> list[EmailResult]:
     return [process_email(address.strip()) for address in request.emails]

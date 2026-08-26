@@ -11,6 +11,13 @@ def test_homepage() -> None:
     assert "Email Format Verifier" in response.text
 
 
+def test_health() -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_verify_returns_one_result_per_address() -> None:
     response = client.post(
         "/api/verify",
