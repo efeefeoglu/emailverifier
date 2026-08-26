@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Email Format Verifier</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="card">
+      <p class="eyebrow">Syntax check</p>
+      <h1>Email Format Verifier</h1>
+      <p class="intro">Enter one email address per line. Validation happens without sending email or making network requests.</p>
+
+      <form id="verify-form">
+        <label for="emails">Email addresses</label>
+        <textarea id="emails" rows="8" placeholder="jane@company.com&#10;john@@company.com" required></textarea>
+        <button type="submit">Check addresses</button>
+      </form>
+
+      <section id="results" hidden aria-live="polite">
+        <h2>Results</h2>
+        <div id="result-list"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
