@@ -15,6 +15,13 @@ Open <http://127.0.0.1:8000>. API documentation is available at `/docs`.
 
 ## API
 
+Send `GET /health` to check whether the service is running. A healthy service
+responds with:
+
+```json
+{"status": "ok"}
+```
+
 Send `POST /api/verify` with:
 
 ```json
