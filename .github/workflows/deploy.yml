@@ -1,3 +1,28 @@
+name: Check secrets
+env:
+  SSH_PRIVATE_KEY: ${{ secrets.DREAMHOST_SSH_KEY }}
+  SSH_HOST: ${{ secrets.DREAMHOST_HOST }}
+  SSH_USER: ${{ secrets.DREAMHOST_USER }}
+run: |
+  if [ -z "$SSH_PRIVATE_KEY" ]; then
+    echo "DREAMHOST_SSH_KEY is EMPTY"
+    exit 1
+  fi
+
+  if [ -z "$SSH_HOST" ]; then
+    echo "DREAMHOST_HOST is EMPTY"
+    exit 1
+  fi
+
+  if [ -z "$SSH_USER" ]; then
+    echo "DREAMHOST_USER is EMPTY"
+    exit 1
+  fi
+
+  echo "All DreamHost secrets are available."
+
+
+
 name: Deploy to DreamHost
 
 on:
