@@ -1,5 +1,6 @@
 import os
 import re
+import secrets
 import smtplib
 import socket
 from collections.abc import Callable
@@ -193,6 +194,12 @@ def mailbox_not_found(code: int, message: bytes | str) -> bool:
     )
 
 
+def catch_all_probe_address(address: str) -> str:
+    """Build an unpredictable mailbox address on the recipient's domain."""
+    domain = address.rsplit("@", 1)[1]
+    return f"email-verifier-{secrets.token_hex(16)}@{domain}"
+
+
 def smtp_hosts(address: str) -> list[str]:
     """Resolve explicit MX hosts in preference order, or the implicit MX."""
     domain = address.rsplit("@", 1)[1].encode("idna").decode("ascii")
@@ -242,6 +249,12 @@ def check_smtp(result: EmailResult) -> EmailResult:
 
                 code, message = smtp.rcpt(result.email)
                 if code in {250, 251, 252}:
+                    # An accepted RCPT only establishes mailbox-specific evidence
+                    # when the server rejects an unpredictable address at the same
+                    # domain. If it accepts both, it is behaving as a catch-all.
+                    probe_code, _ = smtp.rcpt(catch_all_probe_address(result.email))
+                    if probe_code in {250, 251, 252}:
+                        return result.model_copy(update={"smtp_status": "catch_all"})
                     return result.model_copy(update={"smtp_status": "recipient_accepted"})
                 if mailbox_not_found(code, message):
                     return result.model_copy(

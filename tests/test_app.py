@@ -274,11 +274,15 @@ def configure_smtp(monkeypatch) -> None:
 def test_smtp_session_uses_configured_identity_and_envelope_sender(monkeypatch) -> None:
     existing_dns_domain(monkeypatch)
     configure_smtp(monkeypatch)
+    monkeypatch.setattr(
+        "app.validators.catch_all_probe_address",
+        lambda address: "email-verifier-random@company.com",
+    )
 
     result = client.post("/api/verify", json={"emails": ["jane@company.com"]}).json()[0]
 
     assert result["valid"] is True
-    assert result["smtp_status"] == "recipient_accepted"
+    assert result["smtp_status"] == "catch_all"
     smtp = FakeSMTP.instances[0]
     assert (smtp.host, smtp.port, smtp.local_hostname, smtp.timeout) == (
         "mail.example.com",
@@ -291,7 +295,32 @@ def test_smtp_session_uses_configured_identity_and_envelope_sender(monkeypatch) 
         ("helo", "verifier.example.net"),
         ("mail", "probe@example.net"),
         ("rcpt", "jane@company.com"),
+        ("rcpt", "email-verifier-random@company.com"),
     ]
+
+
+def test_smtp_acceptance_is_mailbox_specific_when_random_recipient_is_rejected(
+    monkeypatch,
+) -> None:
+    class NonCatchAllSMTP(FakeSMTP):
+        def rcpt(self, recipient):
+            self.commands.append(("rcpt", recipient))
+            if recipient.startswith("email-verifier-"):
+                return 550, b"5.1.1 User unknown"
+            return 250, b"recipient ok"
+
+    existing_dns_domain(monkeypatch)
+    configure_smtp(monkeypatch)
+    monkeypatch.setattr("app.validators.smtplib.SMTP", NonCatchAllSMTP)
+
+    result = client.post("/api/verify", json={"emails": ["jane@company.com"]}).json()[0]
+
+    assert result["valid"] is True
+    assert result["smtp_status"] == "recipient_accepted"
+    probe = NonCatchAllSMTP.instances[0].commands[-1][1]
+    assert probe.startswith("email-verifier-")
+    assert probe.endswith("@company.com")
+    assert probe != "jane@company.com"
 
 
 def test_smtp_550_511_marks_mailbox_as_not_found(monkeypatch) -> None:

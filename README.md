@@ -58,11 +58,14 @@ server, and `SMTP_MAIL_FROM` must be an address under a domain you control. The
 application connects to the recipient domain's MX servers on port 25 in priority
 order, tries EHLO (falling back to HELO), issues `MAIL FROM` and `RCPT TO`, and
 then closes the session without sending `DATA` or an email. A recipient-specific
-permanent response such as `550 5.1.1` marks the address invalid. Acceptance
-means only that the remote server accepted the SMTP recipient; catch-all and
-anti-enumeration policies can prevent a definitive mailbox result.
+permanent response such as `550 5.1.1` marks the address invalid. After the
+server accepts the requested recipient, the application also tries a randomly
+generated, highly improbable mailbox at the same domain. If both recipients are
+accepted, `smtp_status` is `catch_all` rather than claiming that the individual
+mailbox was confirmed. Anti-enumeration policies can still prevent a definitive
+mailbox result.
 
-The `smtp_status` response field reports `recipient_accepted`,
+The `smtp_status` response field reports `recipient_accepted`, `catch_all`,
 `mailbox_not_found`, an inconclusive/rejected stage, or `not_configured`. Ensure
 your host permits outbound TCP port 25 before enabling this check.
 The response includes both `original_email`, exactly as submitted, and `email`,
