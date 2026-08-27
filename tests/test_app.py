@@ -6,8 +6,25 @@ from app.main import app
 client = TestClient(app)
 
 
+class FakeExchange:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def to_text(self) -> str:
+        return self.value
+
+
+class FakeMxRecord:
+    def __init__(self, preference: int, exchange: str) -> None:
+        self.preference = preference
+        self.exchange = FakeExchange(exchange)
+
+
 def existing_dns_domain(monkeypatch) -> None:
-    monkeypatch.setattr("app.validators.dns.resolver.resolve", lambda domain, rdtype: ())
+    monkeypatch.setattr(
+        "app.validators.dns.resolver.resolve",
+        lambda domain, rdtype: [FakeMxRecord(10, "mail.example.com.")],
+    )
 
 
 def test_homepage() -> None:
@@ -102,11 +119,43 @@ def test_nonexistent_domain_is_rejected(monkeypatch) -> None:
     }
 
 
-def test_domain_without_mx_records_still_exists(monkeypatch) -> None:
+def test_domain_without_mx_records_is_rejected(monkeypatch) -> None:
     def domain_without_mx(domain: str, rdtype: str) -> None:
         raise dns.resolver.NoAnswer
 
     monkeypatch.setattr("app.validators.dns.resolver.resolve", domain_without_mx)
+
+    response = client.post("/api/verify", json={"emails": ["user@example.org"]})
+
+    assert response.json()[0] == {
+        "original_email": "user@example.org",
+        "email": "user@example.org",
+        "valid": False,
+        "reason": "The domain example.org has no MX records.",
+    }
+
+
+def test_null_mx_domain_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.validators.dns.resolver.resolve",
+        lambda domain, rdtype: [FakeMxRecord(0, ".")],
+    )
+
+    response = client.post("/api/verify", json={"emails": ["user@example.org"]})
+
+    assert response.json()[0] == {
+        "original_email": "user@example.org",
+        "email": "user@example.org",
+        "valid": False,
+        "reason": "The domain example.org declares that it does not accept email.",
+    }
+
+
+def test_temporary_dns_failure_is_inconclusive(monkeypatch) -> None:
+    def timed_out(domain: str, rdtype: str) -> None:
+        raise dns.resolver.LifetimeTimeout
+
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", timed_out)
 
     response = client.post("/api/verify", json={"emails": ["user@example.org"]})
 

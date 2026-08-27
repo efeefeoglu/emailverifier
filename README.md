@@ -1,7 +1,8 @@
 # Email Format Verifier
 
 A small FastAPI application that checks the syntax of a list of email addresses
-and confirms that each address's domain exists in DNS. It does not send messages.
+and confirms that each address's domain publishes mail exchange (MX) records. It
+does not send messages.
 
 ## Run locally
 
@@ -31,10 +32,11 @@ Send `POST /api/verify` with:
 
 Before validation, the service removes common copy/paste formatting, trims
 whitespace, and normalizes domains (including internationalized domain names).
-It then looks up the domain in DNS and immediately rejects an address when the
-resolver confirms that its domain does not exist. Missing MX records alone do
-not make an existing domain invalid, and temporary DNS failures are treated as
-inconclusive rather than invalid.
+It then looks up the domain in DNS and rejects an address when the resolver
+confirms that its domain does not exist or has no MX records. Domains that use a
+Null MX record to explicitly declare that they do not accept email are also
+rejected without attempting an SMTP connection. Temporary DNS failures are
+treated as inconclusive rather than invalid.
 The response includes both `original_email`, exactly as submitted, and `email`,
 the cleaned and normalized value. Future checks can be appended to `OPERATIONS`
 in `app/validators.py`.
