@@ -2,6 +2,7 @@ import re
 from collections.abc import Callable
 from email.utils import parseaddr
 
+import dns.resolver
 from email_validator import EmailNotValidError, validate_email
 
 from .models import EmailResult
@@ -44,8 +45,31 @@ def check_format(result: EmailResult) -> EmailResult:
     return result.model_copy(update={"email": validated.normalized})
 
 
+def check_domain_exists(result: EmailResult) -> EmailResult:
+    """Reject an address when DNS confirms that its domain does not exist.
+
+    Querying MX records establishes whether the domain exists without requiring
+    it to have a particular kind of mail configuration. A NOERROR response with
+    no MX records still proves the name exists, while transient resolver errors
+    are left inconclusive rather than incorrectly rejecting the address.
+    """
+    domain = result.email.rsplit("@", 1)[1]
+    ascii_domain = domain.encode("idna").decode("ascii")
+
+    try:
+        dns.resolver.resolve(ascii_domain, "MX")
+    except dns.resolver.NXDOMAIN:
+        return result.model_copy(
+            update={"valid": False, "reason": f"The domain {domain} does not exist."}
+        )
+    except (dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.resolver.LifetimeTimeout):
+        pass
+
+    return result
+
+
 # Add future per-address checks to this pipeline.
-OPERATIONS: tuple[EmailOperation, ...] = (check_format,)
+OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_domain_exists)
 
 
 def process_email(address: str) -> EmailResult:
