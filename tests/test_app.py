@@ -56,6 +56,7 @@ def test_verify_returns_one_result_per_address(monkeypatch) -> None:
         "valid": True,
         "reason": None,
         "provider": None,
+        "smtp_status": "not_configured",
     }
     assert all(item["reason"] for item in results[1:])
 
@@ -76,6 +77,7 @@ def test_addresses_are_cleaned_and_original_input_is_preserved(monkeypatch) -> N
         "valid": True,
         "reason": None,
         "provider": None,
+        "smtp_status": "not_configured",
     }
 
 
@@ -119,6 +121,7 @@ def test_nonexistent_domain_is_rejected(monkeypatch) -> None:
         "valid": False,
         "reason": "The domain does-not-exist.example.net does not exist.",
         "provider": None,
+        "smtp_status": None,
     }
 
 
@@ -136,6 +139,7 @@ def test_domain_without_mx_or_address_records_is_rejected(monkeypatch) -> None:
         "valid": False,
         "reason": "The domain example.org has no MX, A, or AAAA records.",
         "provider": None,
+        "smtp_status": None,
     }
 
 
@@ -184,6 +188,7 @@ def test_null_mx_domain_is_rejected(monkeypatch) -> None:
         "valid": False,
         "reason": "The domain example.org declares that it does not accept email.",
         "provider": None,
+        "smtp_status": None,
     }
 
 
@@ -222,3 +227,102 @@ def test_temporary_dns_failure_is_inconclusive(monkeypatch) -> None:
     response = client.post("/api/verify", json={"emails": ["user@example.org"]})
 
     assert response.json()[0]["valid"] is True
+
+
+class FakeSMTP:
+    instances = []
+
+    def __init__(self, host, port, local_hostname, timeout) -> None:
+        self.host = host
+        self.port = port
+        self.local_hostname = local_hostname
+        self.timeout = timeout
+        self.commands = []
+        self.__class__.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args) -> None:
+        return None
+
+    def ehlo(self, hostname):
+        self.commands.append(("ehlo", hostname))
+        return 500, b"EHLO unavailable"
+
+    def helo(self, hostname):
+        self.commands.append(("helo", hostname))
+        return 250, b"hello"
+
+    def mail(self, sender):
+        self.commands.append(("mail", sender))
+        return 250, b"sender ok"
+
+    def rcpt(self, recipient):
+        self.commands.append(("rcpt", recipient))
+        return 250, b"recipient ok"
+
+
+def configure_smtp(monkeypatch) -> None:
+    monkeypatch.setenv("SMTP_HELO_HOSTNAME", "verifier.example.net")
+    monkeypatch.setenv("SMTP_MAIL_FROM", "probe@example.net")
+    monkeypatch.setenv("SMTP_TIMEOUT", "3")
+    monkeypatch.setattr("app.validators.smtplib.SMTP", FakeSMTP)
+    FakeSMTP.instances.clear()
+
+
+def test_smtp_session_uses_configured_identity_and_envelope_sender(monkeypatch) -> None:
+    existing_dns_domain(monkeypatch)
+    configure_smtp(monkeypatch)
+
+    result = client.post("/api/verify", json={"emails": ["jane@company.com"]}).json()[0]
+
+    assert result["valid"] is True
+    assert result["smtp_status"] == "recipient_accepted"
+    smtp = FakeSMTP.instances[0]
+    assert (smtp.host, smtp.port, smtp.local_hostname, smtp.timeout) == (
+        "mail.example.com",
+        25,
+        "verifier.example.net",
+        3.0,
+    )
+    assert smtp.commands == [
+        ("ehlo", "verifier.example.net"),
+        ("helo", "verifier.example.net"),
+        ("mail", "probe@example.net"),
+        ("rcpt", "jane@company.com"),
+    ]
+
+
+def test_smtp_550_511_marks_mailbox_as_not_found(monkeypatch) -> None:
+    class RejectingSMTP(FakeSMTP):
+        def rcpt(self, recipient):
+            self.commands.append(("rcpt", recipient))
+            return 550, b"5.1.1 User unknown"
+
+    existing_dns_domain(monkeypatch)
+    configure_smtp(monkeypatch)
+    monkeypatch.setattr("app.validators.smtplib.SMTP", RejectingSMTP)
+
+    result = client.post("/api/verify", json={"emails": ["missing@company.com"]}).json()[0]
+
+    assert result["valid"] is False
+    assert result["smtp_status"] == "mailbox_not_found"
+    assert result["reason"] == (
+        "The receiving mail server reports that this mailbox does not exist."
+    )
+
+
+def test_generic_recipient_policy_rejection_is_inconclusive(monkeypatch) -> None:
+    class PolicyRejectingSMTP(FakeSMTP):
+        def rcpt(self, recipient):
+            return 550, b"5.7.1 Relay denied"
+
+    existing_dns_domain(monkeypatch)
+    configure_smtp(monkeypatch)
+    monkeypatch.setattr("app.validators.smtplib.SMTP", PolicyRejectingSMTP)
+
+    result = client.post("/api/verify", json={"emails": ["jane@company.com"]}).json()[0]
+
+    assert result["valid"] is True
+    assert result["smtp_status"] == "recipient_inconclusive"

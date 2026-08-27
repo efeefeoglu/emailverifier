@@ -1,4 +1,7 @@
+import os
 import re
+import smtplib
+import socket
 from collections.abc import Callable
 from email.utils import parseaddr
 
@@ -9,6 +12,24 @@ from .models import EmailResult
 
 
 EmailOperation = Callable[[EmailResult], EmailResult]
+
+
+def smtp_settings() -> tuple[str, str, float] | None:
+    """Return the explicitly configured SMTP identity and envelope sender.
+
+    SMTP probing is deliberately opt-in: an operator must supply a real,
+    forward-confirmed hostname and an address on a domain they control rather
+    than this application inventing identities that may be rejected or abused.
+    """
+    hostname = os.getenv("SMTP_HELO_HOSTNAME", "").strip().rstrip(".")
+    mail_from = os.getenv("SMTP_MAIL_FROM", "").strip()
+    if not hostname or not mail_from:
+        return None
+    try:
+        timeout = max(1.0, float(os.getenv("SMTP_TIMEOUT", "10")))
+    except ValueError:
+        timeout = 10.0
+    return hostname, mail_from, timeout
 
 
 # MX hosts are matched on DNS label boundaries so, for example, a domain named
@@ -149,8 +170,95 @@ def check_mx_records(result: EmailResult) -> EmailResult:
     return result.model_copy(update={"provider": detect_mail_provider(mx_hosts)})
 
 
+MAILBOX_NOT_FOUND_CODES = {550, 551, 553}
+MAILBOX_NOT_FOUND_MARKERS = (
+    "5.1.1",
+    "5.1.0",
+    "user unknown",
+    "unknown user",
+    "no such user",
+    "no such mailbox",
+    "mailbox not found",
+    "recipient not found",
+    "invalid recipient",
+)
+
+
+def mailbox_not_found(code: int, message: bytes | str) -> bool:
+    """Recognize permanent, recipient-specific mailbox rejections."""
+    text = message.decode("utf-8", "replace") if isinstance(message, bytes) else message
+    normalized = text.lower()
+    return code in MAILBOX_NOT_FOUND_CODES and any(
+        marker in normalized for marker in MAILBOX_NOT_FOUND_MARKERS
+    )
+
+
+def smtp_hosts(address: str) -> list[str]:
+    """Resolve explicit MX hosts in preference order, or the implicit MX."""
+    domain = address.rsplit("@", 1)[1].encode("idna").decode("ascii")
+    try:
+        records = list(dns.resolver.resolve(domain, "MX"))
+    except dns.resolver.NoAnswer:
+        return [domain]
+    return [
+        record.exchange.to_text().rstrip(".")
+        for record in sorted(records, key=lambda record: record.preference)
+        if record.exchange.to_text() != "."
+    ]
+
+
+def check_smtp(result: EmailResult) -> EmailResult:
+    """Probe the SMTP envelope without sending message data."""
+    settings = smtp_settings()
+    if settings is None:
+        return result.model_copy(update={"smtp_status": "not_configured"})
+
+    hostname, mail_from, timeout = settings
+    last_status = "connection_failed"
+    try:
+        hosts = smtp_hosts(result.email)
+    except (dns.resolver.DNSException, UnicodeError):
+        return result.model_copy(update={"smtp_status": "dns_inconclusive"})
+
+    for host in hosts:
+        try:
+            with smtplib.SMTP(
+                host=host,
+                port=25,
+                local_hostname=hostname,
+                timeout=timeout,
+            ) as smtp:
+                code, _ = smtp.ehlo(hostname)
+                if not 200 <= code < 300:
+                    code, _ = smtp.helo(hostname)
+                if not 200 <= code < 300:
+                    last_status = "greeting_rejected"
+                    continue
+
+                code, _ = smtp.mail(mail_from)
+                if not 200 <= code < 300:
+                    last_status = "mail_from_rejected"
+                    continue
+
+                code, message = smtp.rcpt(result.email)
+                if code in {250, 251, 252}:
+                    return result.model_copy(update={"smtp_status": "recipient_accepted"})
+                if mailbox_not_found(code, message):
+                    return result.model_copy(
+                        update={
+                            "valid": False,
+                            "smtp_status": "mailbox_not_found",
+                            "reason": "The receiving mail server reports that this mailbox does not exist.",
+                        }
+                    )
+                return result.model_copy(update={"smtp_status": "recipient_inconclusive"})
+        except (OSError, smtplib.SMTPException, socket.timeout):
+            continue
+    return result.model_copy(update={"smtp_status": last_status})
+
+
 # Add future per-address checks to this pipeline.
-OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_mx_records)
+OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_mx_records, check_smtp)
 
 
 def process_email(address: str) -> EmailResult:
