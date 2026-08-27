@@ -37,6 +37,11 @@ form.addEventListener("submit", async (event) => {
         row.append(original);
       }
       row.append(detail);
+      if (item.provider) {
+        const provider = document.createElement("span");
+        provider.textContent = `Mail provider: ${item.provider}`;
+        row.append(provider);
+      }
       resultList.append(row);
     }
     results.hidden = false;

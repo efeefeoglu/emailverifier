@@ -11,6 +11,66 @@ from .models import EmailResult
 EmailOperation = Callable[[EmailResult], EmailResult]
 
 
+# MX hosts are matched on DNS label boundaries so, for example, a domain named
+# ``notgoogle.com`` cannot be mistaken for Google. More-specific suffixes should
+# precede their parent suffix when providers share a namespace.
+MAIL_PROVIDER_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("mail.protection.outlook.com", "Microsoft 365"),
+    ("googlemail.com", "Google Workspace"),
+    ("google.com", "Google Workspace"),
+    ("pphosted.com", "Proofpoint"),
+    ("proofpoint.com", "Proofpoint"),
+    ("mimecast.com", "Mimecast"),
+    ("zoho.com", "Zoho"),
+    ("zoho.eu", "Zoho"),
+    ("zoho.in", "Zoho"),
+    ("amazonses.com", "Amazon SES"),
+    ("messagingengine.com", "Fastmail"),
+    ("protonmail.ch", "Proton Mail"),
+    ("protonmail.net", "Proton Mail"),
+    ("icloud.com", "Apple iCloud Mail"),
+    ("yahoodns.net", "Yahoo Mail"),
+)
+
+
+def detect_mail_provider(mx_hosts: list[str]) -> str | None:
+    """Return the known provider serving one of the supplied MX hostnames."""
+    for host in mx_hosts:
+        normalized_host = host.rstrip(".").lower()
+        for suffix, provider in MAIL_PROVIDER_SUFFIXES:
+            if normalized_host == suffix or normalized_host.endswith(f".{suffix}"):
+                return provider
+    return None
+
+
+def check_address_fallback(
+    result: EmailResult, domain: str, ascii_domain: str
+) -> EmailResult:
+    """Apply SMTP's implicit-MX rule by looking for an A or AAAA address."""
+    temporary_failure = False
+    for record_type in ("A", "AAAA"):
+        try:
+            if list(dns.resolver.resolve(ascii_domain, record_type)):
+                return result
+        except dns.resolver.NXDOMAIN:
+            return result.model_copy(
+                update={"valid": False, "reason": f"The domain {domain} does not exist."}
+            )
+        except dns.resolver.NoAnswer:
+            continue
+        except (dns.resolver.NoNameservers, dns.resolver.LifetimeTimeout):
+            temporary_failure = True
+
+    if temporary_failure:
+        return result
+    return result.model_copy(
+        update={
+            "valid": False,
+            "reason": f"The domain {domain} has no MX, A, or AAAA records.",
+        }
+    )
+
+
 def clean_email(address: str) -> str:
     """Remove common copy/paste artifacts before validating an address."""
     cleaned = address.strip().removeprefix("\ufeff")
@@ -46,11 +106,13 @@ def check_format(result: EmailResult) -> EmailResult:
 
 
 def check_mx_records(result: EmailResult) -> EmailResult:
-    """Reject domains that do not publish a usable MX record.
+    """Find a domain's explicit or implicit mail exchanger.
 
     Resolver failures are kept inconclusive because they do not establish that
     the domain cannot receive mail. NXDOMAIN, an authoritative empty MX answer,
     and Null MX declarations can be rejected without contacting a mail server.
+    Per RFC 5321, a domain without MX records is still usable when its own A or
+    AAAA record can act as an implicit, preference-zero MX.
     """
     domain = result.email.rsplit("@", 1)[1]
     ascii_domain = domain.encode("idna").decode("ascii")
@@ -62,17 +124,13 @@ def check_mx_records(result: EmailResult) -> EmailResult:
             update={"valid": False, "reason": f"The domain {domain} does not exist."}
         )
     except dns.resolver.NoAnswer:
-        return result.model_copy(
-            update={"valid": False, "reason": f"The domain {domain} has no MX records."}
-        )
+        return check_address_fallback(result, domain, ascii_domain)
     except (dns.resolver.NoNameservers, dns.resolver.LifetimeTimeout):
         return result
 
     mx_records = list(answers)
     if not mx_records:
-        return result.model_copy(
-            update={"valid": False, "reason": f"The domain {domain} has no MX records."}
-        )
+        return check_address_fallback(result, domain, ascii_domain)
 
     # RFC 7505 represents Null MX as a priority-zero record whose exchange is
     # the DNS root (serialized by dnspython as a single dot).
@@ -87,7 +145,8 @@ def check_mx_records(result: EmailResult) -> EmailResult:
             }
         )
 
-    return result
+    mx_hosts = [record.exchange.to_text() for record in mx_records]
+    return result.model_copy(update={"provider": detect_mail_provider(mx_hosts)})
 
 
 # Add future per-address checks to this pipeline.
