@@ -45,31 +45,53 @@ def check_format(result: EmailResult) -> EmailResult:
     return result.model_copy(update={"email": validated.normalized})
 
 
-def check_domain_exists(result: EmailResult) -> EmailResult:
-    """Reject an address when DNS confirms that its domain does not exist.
+def check_mx_records(result: EmailResult) -> EmailResult:
+    """Reject domains that do not publish a usable MX record.
 
-    Querying MX records establishes whether the domain exists without requiring
-    it to have a particular kind of mail configuration. A NOERROR response with
-    no MX records still proves the name exists, while transient resolver errors
-    are left inconclusive rather than incorrectly rejecting the address.
+    Resolver failures are kept inconclusive because they do not establish that
+    the domain cannot receive mail. NXDOMAIN, an authoritative empty MX answer,
+    and Null MX declarations can be rejected without contacting a mail server.
     """
     domain = result.email.rsplit("@", 1)[1]
     ascii_domain = domain.encode("idna").decode("ascii")
 
     try:
-        dns.resolver.resolve(ascii_domain, "MX")
+        answers = dns.resolver.resolve(ascii_domain, "MX")
     except dns.resolver.NXDOMAIN:
         return result.model_copy(
             update={"valid": False, "reason": f"The domain {domain} does not exist."}
         )
-    except (dns.resolver.NoAnswer, dns.resolver.NoNameservers, dns.resolver.LifetimeTimeout):
-        pass
+    except dns.resolver.NoAnswer:
+        return result.model_copy(
+            update={"valid": False, "reason": f"The domain {domain} has no MX records."}
+        )
+    except (dns.resolver.NoNameservers, dns.resolver.LifetimeTimeout):
+        return result
+
+    mx_records = list(answers)
+    if not mx_records:
+        return result.model_copy(
+            update={"valid": False, "reason": f"The domain {domain} has no MX records."}
+        )
+
+    # RFC 7505 represents Null MX as a priority-zero record whose exchange is
+    # the DNS root (serialized by dnspython as a single dot).
+    if any(
+        record.preference == 0 and record.exchange.to_text() == "."
+        for record in mx_records
+    ):
+        return result.model_copy(
+            update={
+                "valid": False,
+                "reason": f"The domain {domain} declares that it does not accept email.",
+            }
+        )
 
     return result
 
 
 # Add future per-address checks to this pipeline.
-OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_domain_exists)
+OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_mx_records)
 
 
 def process_email(address: str) -> EmailResult:
