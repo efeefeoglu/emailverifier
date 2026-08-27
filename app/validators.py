@@ -15,6 +15,31 @@ from .models import EmailResult
 EmailOperation = Callable[[EmailResult], EmailResult]
 
 
+ROLE_ACCOUNT_LOCAL_PARTS = frozenset(
+    {"admin", "billing", "info", "marketing", "office", "sales", "support"}
+)
+
+# Match consumer mailbox domains directly rather than inferring them from MX
+# records. The same MX infrastructure can also serve paid business domains.
+FREE_EMAIL_PROVIDERS = {
+    "gmail.com": "Gmail",
+    "googlemail.com": "Gmail",
+    "hotmail.com": "Outlook",
+    "hotmail.co.uk": "Outlook",
+    "live.com": "Outlook",
+    "msn.com": "Outlook",
+    "outlook.com": "Outlook",
+    "icloud.com": "iCloud",
+    "me.com": "iCloud",
+    "mac.com": "iCloud",
+    "proton.me": "Proton Mail",
+    "protonmail.com": "Proton Mail",
+    "pm.me": "Proton Mail",
+    "yahoo.com": "Yahoo Mail",
+    "ymail.com": "Yahoo Mail",
+}
+
+
 def smtp_settings() -> tuple[str, str, float] | None:
     """Return the explicitly configured SMTP identity and envelope sender.
 
@@ -125,6 +150,34 @@ def check_format(result: EmailResult) -> EmailResult:
     except EmailNotValidError as error:
         return result.model_copy(update={"valid": False, "reason": str(error)})
     return result.model_copy(update={"email": validated.normalized})
+
+
+def check_role_account(result: EmailResult) -> EmailResult:
+    """Reject generic departmental mailboxes rather than individual leads."""
+    local_part = result.email.rsplit("@", 1)[0].lower()
+    if local_part not in ROLE_ACCOUNT_LOCAL_PARTS:
+        return result
+    return result.model_copy(
+        update={
+            "valid": False,
+            "reason": f"The address uses the generic role account '{local_part}@'.",
+        }
+    )
+
+
+def check_free_email_provider(result: EmailResult) -> EmailResult:
+    """Reject addresses hosted on a known consumer email domain."""
+    domain = result.email.rsplit("@", 1)[1].lower()
+    provider = FREE_EMAIL_PROVIDERS.get(domain)
+    if provider is None:
+        return result
+    return result.model_copy(
+        update={
+            "valid": False,
+            "provider": provider,
+            "reason": f"The address uses the free email provider {provider}.",
+        }
+    )
 
 
 def check_mx_records(result: EmailResult) -> EmailResult:
@@ -271,7 +324,13 @@ def check_smtp(result: EmailResult) -> EmailResult:
 
 
 # Add future per-address checks to this pipeline.
-OPERATIONS: tuple[EmailOperation, ...] = (check_format, check_mx_records, check_smtp)
+OPERATIONS: tuple[EmailOperation, ...] = (
+    check_format,
+    check_role_account,
+    check_free_email_provider,
+    check_mx_records,
+    check_smtp,
+)
 
 
 def process_email(address: str) -> EmailResult:

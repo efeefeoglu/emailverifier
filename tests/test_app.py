@@ -66,6 +66,63 @@ def test_illegal_characters_are_rejected() -> None:
     assert response.json()[0]["valid"] is False
 
 
+def test_role_accounts_are_rejected_without_dns_lookup(monkeypatch) -> None:
+    def unexpected_dns_lookup(domain: str, rdtype: str) -> None:
+        raise AssertionError("role account detection should run before DNS")
+
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", unexpected_dns_lookup)
+
+    emails = [
+        "info@company.com",
+        "Sales@company.com",
+        "support@company.com",
+        "admin@company.com",
+        "office@company.com",
+        "billing@company.com",
+        "marketing@company.com",
+    ]
+    results = client.post("/api/verify", json={"emails": emails}).json()
+
+    assert all(result["valid"] is False for result in results)
+    assert all("generic role account" in result["reason"] for result in results)
+
+
+def test_free_email_providers_are_rejected_without_dns_lookup(monkeypatch) -> None:
+    def unexpected_dns_lookup(domain: str, rdtype: str) -> None:
+        raise AssertionError("free provider detection should run before DNS")
+
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", unexpected_dns_lookup)
+
+    emails = [
+        "person@gmail.com",
+        "person@outlook.com",
+        "person@yahoo.com",
+        "person@icloud.com",
+        "person@proton.me",
+    ]
+    results = client.post("/api/verify", json={"emails": emails}).json()
+
+    assert [result["provider"] for result in results] == [
+        "Gmail",
+        "Outlook",
+        "Yahoo Mail",
+        "iCloud",
+        "Proton Mail",
+    ]
+    assert all(result["valid"] is False for result in results)
+    assert all("free email provider" in result["reason"] for result in results)
+
+
+def test_provider_domain_must_match_exactly(monkeypatch) -> None:
+    existing_dns_domain(monkeypatch)
+
+    result = client.post(
+        "/api/verify", json={"emails": ["person@notgmail.com"]}
+    ).json()[0]
+
+    assert result["valid"] is True
+
+
 def test_addresses_are_cleaned_and_original_input_is_preserved(monkeypatch) -> None:
     existing_dns_domain(monkeypatch)
     submitted = "  mailto:Jane.Doe @ EXAMPLE.COM  "

@@ -42,6 +42,13 @@ mail service, the response's `provider` field identifies providers including
 Google Workspace, Microsoft 365, Zoho, Mimecast, Proofpoint, and other common
 services.
 
+Addresses using generic role mailbox names (`info@`, `sales@`, `support@`,
+`admin@`, `office@`, `billing@`, and `marketing@`) are marked invalid for B2B
+lead-list use. Addresses on known free consumer services—including Gmail,
+Outlook, Yahoo, iCloud, and Proton Mail—are also marked invalid. Free-provider
+detection matches the address domain directly, so a business domain using the
+same provider's mail infrastructure is not incorrectly rejected.
+
 ## SMTP mailbox verification
 
 SMTP probing is opt-in because the verifier must use identities that you really
