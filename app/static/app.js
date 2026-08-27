@@ -7,8 +7,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const emails = document.querySelector("#emails").value
     .split(/[\n,]+/)
-    .map((email) => email.trim())
-    .filter(Boolean);
+    .filter((email) => email.trim());
 
   button.disabled = true;
   button.textContent = "Checking…";
@@ -31,7 +30,13 @@ form.addEventListener("submit", async (event) => {
       address.textContent = item.email || "(empty address)";
       const detail = document.createElement("span");
       detail.textContent = item.valid ? "Valid format" : item.reason;
-      row.append(address, detail);
+      row.append(address);
+      if (item.original_email !== item.email) {
+        const original = document.createElement("span");
+        original.textContent = `Submitted: ${item.original_email}`;
+        row.append(original);
+      }
+      row.append(detail);
       resultList.append(row);
     }
     results.hidden = false;
