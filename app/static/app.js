@@ -42,6 +42,11 @@ form.addEventListener("submit", async (event) => {
         provider.textContent = `Mail provider: ${item.provider}`;
         row.append(provider);
       }
+      if (item.smtp_status) {
+        const smtp = document.createElement("span");
+        smtp.textContent = `SMTP check: ${item.smtp_status.replaceAll("_", " ")}`;
+        row.append(smtp);
+      }
       resultList.append(row);
     }
     results.hidden = false;

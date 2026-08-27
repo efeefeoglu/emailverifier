@@ -11,3 +11,4 @@ class EmailResult(BaseModel):
     valid: bool
     reason: str | None = None
     provider: str | None = None
+    smtp_status: str | None = None
