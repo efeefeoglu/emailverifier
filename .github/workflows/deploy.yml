@@ -82,12 +82,12 @@ jobs:
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 
           systemctl --user restart email-verifier-web.service
-          systemctl --user restart email-verifier-worker.service
+          #systemctl --user restart email-verifier-worker.service
 
           echo "==> Checking services"
 
           systemctl --user is-active email-verifier-web.service
-          systemctl --user is-active email-verifier-worker.service
+          #systemctl --user is-active email-verifier-worker.service
 
           echo "==> Deployment completed"
           EOF
