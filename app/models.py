@@ -6,6 +6,7 @@ class EmailList(BaseModel):
 
 
 class EmailResult(BaseModel):
+    original_email: str
     email: str
     valid: bool
     reason: str | None = None

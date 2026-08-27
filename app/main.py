@@ -25,4 +25,4 @@ def health() -> dict[str, str]:
 
 @app.post("/api/verify", response_model=list[EmailResult])
 def verify_emails(request: EmailList) -> list[EmailResult]:
-    return [process_email(address.strip()) for address in request.emails]
+    return [process_email(address) for address in request.emails]

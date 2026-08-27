@@ -28,7 +28,11 @@ Send `POST /api/verify` with:
 {"emails": ["jane@company.com", "john@@company.com"]}
 ```
 
-The response is an array with a result for each input address. Future checks can be appended to `OPERATIONS` in `app/validators.py`.
+Before validation, the service removes common copy/paste formatting, trims
+whitespace, and normalizes domains (including internationalized domain names).
+The response includes both `original_email`, exactly as submitted, and `email`,
+the cleaned and normalized value. Future checks can be appended to `OPERATIONS`
+in `app/validators.py`.
 
 ## Nginx
 
