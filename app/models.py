@@ -10,3 +10,4 @@ class EmailResult(BaseModel):
     email: str
     valid: bool
     reason: str | None = None
+    provider: str | None = None

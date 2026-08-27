@@ -55,6 +55,7 @@ def test_verify_returns_one_result_per_address(monkeypatch) -> None:
         "email": "jane@company.com",
         "valid": True,
         "reason": None,
+        "provider": None,
     }
     assert all(item["reason"] for item in results[1:])
 
@@ -74,6 +75,7 @@ def test_addresses_are_cleaned_and_original_input_is_preserved(monkeypatch) -> N
         "email": "Jane.Doe@example.com",
         "valid": True,
         "reason": None,
+        "provider": None,
     }
 
 
@@ -116,14 +118,15 @@ def test_nonexistent_domain_is_rejected(monkeypatch) -> None:
         "email": "user@does-not-exist.example.net",
         "valid": False,
         "reason": "The domain does-not-exist.example.net does not exist.",
+        "provider": None,
     }
 
 
-def test_domain_without_mx_records_is_rejected(monkeypatch) -> None:
-    def domain_without_mx(domain: str, rdtype: str) -> None:
+def test_domain_without_mx_or_address_records_is_rejected(monkeypatch) -> None:
+    def domain_without_mail_dns(domain: str, rdtype: str) -> None:
         raise dns.resolver.NoAnswer
 
-    monkeypatch.setattr("app.validators.dns.resolver.resolve", domain_without_mx)
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", domain_without_mail_dns)
 
     response = client.post("/api/verify", json={"emails": ["user@example.org"]})
 
@@ -131,8 +134,40 @@ def test_domain_without_mx_records_is_rejected(monkeypatch) -> None:
         "original_email": "user@example.org",
         "email": "user@example.org",
         "valid": False,
-        "reason": "The domain example.org has no MX records.",
+        "reason": "The domain example.org has no MX, A, or AAAA records.",
+        "provider": None,
     }
+
+
+def test_a_record_is_accepted_as_an_implicit_mx(monkeypatch) -> None:
+    queried_types = []
+
+    def implicit_mx(domain: str, rdtype: str):
+        queried_types.append(rdtype)
+        if rdtype == "A":
+            return ["192.0.2.10"]
+        raise dns.resolver.NoAnswer
+
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", implicit_mx)
+
+    result = client.post("/api/verify", json={"emails": ["user@example.org"]}).json()[0]
+
+    assert result["valid"] is True
+    assert result["provider"] is None
+    assert queried_types == ["MX", "A"]
+
+
+def test_aaaa_record_is_accepted_as_an_implicit_mx(monkeypatch) -> None:
+    def implicit_mx(domain: str, rdtype: str):
+        if rdtype == "AAAA":
+            return ["2001:db8::10"]
+        raise dns.resolver.NoAnswer
+
+    monkeypatch.setattr("app.validators.dns.resolver.resolve", implicit_mx)
+
+    result = client.post("/api/verify", json={"emails": ["user@example.org"]}).json()[0]
+
+    assert result["valid"] is True
 
 
 def test_null_mx_domain_is_rejected(monkeypatch) -> None:
@@ -148,7 +183,34 @@ def test_null_mx_domain_is_rejected(monkeypatch) -> None:
         "email": "user@example.org",
         "valid": False,
         "reason": "The domain example.org declares that it does not accept email.",
+        "provider": None,
     }
+
+
+def test_common_mail_provider_is_detected_from_mx_hostname(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.validators.dns.resolver.resolve",
+        lambda domain, rdtype: [
+            FakeMxRecord(10, "ASPMX.L.GOOGLE.COM."),
+            FakeMxRecord(20, "alt1.aspmx.l.google.com."),
+        ],
+    )
+
+    result = client.post("/api/verify", json={"emails": ["user@example.org"]}).json()[0]
+
+    assert result["valid"] is True
+    assert result["provider"] == "Google Workspace"
+
+
+def test_provider_suffix_must_match_on_dns_label_boundary(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.validators.dns.resolver.resolve",
+        lambda domain, rdtype: [FakeMxRecord(10, "mx.notgoogle.com.")],
+    )
+
+    result = client.post("/api/verify", json={"emails": ["user@example.org"]}).json()[0]
+
+    assert result["provider"] is None
 
 
 def test_temporary_dns_failure_is_inconclusive(monkeypatch) -> None:
