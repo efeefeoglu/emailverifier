@@ -446,7 +446,7 @@ def test_smtp_550_511_marks_mailbox_as_not_found(monkeypatch) -> None:
     )
 
 
-def test_generic_recipient_policy_rejection_is_inconclusive(monkeypatch) -> None:
+def test_generic_recipient_policy_rejection_is_invalid(monkeypatch) -> None:
     class PolicyRejectingSMTP(FakeSMTP):
         def rcpt(self, recipient):
             return 550, b"5.7.1 Relay denied"
@@ -457,5 +457,8 @@ def test_generic_recipient_policy_rejection_is_inconclusive(monkeypatch) -> None
 
     result = client.post("/api/verify", json={"emails": ["jane@company.com"]}).json()[0]
 
-    assert result["valid"] is True
+    assert result["valid"] is False
     assert result["smtp_status"] == "recipient_inconclusive"
+    assert result["reason"] == (
+        "The receiving mail server did not accept the recipient address."
+    )
