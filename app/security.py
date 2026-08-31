@@ -33,7 +33,7 @@ class APIKeyRateLimiter:
         x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     ) -> str:
         configured_keys = tuple(
-            key.strip() for key in os.getenv("API_KEYS", "tempefe").split(",") if key.strip()
+            key.strip() for key in os.getenv("API_KEYS", "").split(",") if key.strip()
         )
         if not configured_keys:
             raise HTTPException(
