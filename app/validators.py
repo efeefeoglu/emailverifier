@@ -317,7 +317,13 @@ def check_smtp(result: EmailResult) -> EmailResult:
                             "reason": "The receiving mail server reports that this mailbox does not exist.",
                         }
                     )
-                return result.model_copy(update={"smtp_status": "recipient_inconclusive"})
+                return result.model_copy(
+                    update={
+                        "valid": False,
+                        "smtp_status": "recipient_inconclusive",
+                        "reason": "The receiving mail server did not accept the recipient address.",
+                    }
+                )
         except (OSError, smtplib.SMTPException, socket.timeout):
             continue
     return result.model_copy(update={"smtp_status": last_status})

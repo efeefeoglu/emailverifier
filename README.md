@@ -106,8 +106,10 @@ permanent response such as `550 5.1.1` marks the address invalid. After the
 server accepts the requested recipient, the application also tries a randomly
 generated, highly improbable mailbox at the same domain. If both recipients are
 accepted, `smtp_status` is `catch_all` rather than claiming that the individual
-mailbox was confirmed. Anti-enumeration policies can still prevent a definitive
-mailbox result.
+mailbox was confirmed. Any rejected recipient response that cannot be identified
+as a mailbox-not-found error uses `smtp_status` `recipient_inconclusive` and is
+also considered invalid. Anti-enumeration policies can still prevent a
+definitive mailbox result.
 
 The `smtp_status` response field reports `recipient_accepted`, `catch_all`,
 `mailbox_not_found`, an inconclusive/rejected stage, or `not_configured`. Ensure
