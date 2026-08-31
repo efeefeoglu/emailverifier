@@ -65,6 +65,7 @@ form.addEventListener("submit", async (event) => {
   const emails = document.querySelector("#emails").value
     .split(/[\n,]+/)
     .filter((email) => email.trim());
+  const apiKey = document.querySelector("#api-key").value;
 
   button.disabled = true;
   button.textContent = "Checking…";
@@ -75,10 +76,16 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/verify", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      },
       body: JSON.stringify({ emails }),
     });
-    if (!response.ok) throw new Error("The request could not be completed.");
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "The request could not be completed.");
+    }
 
     const data = await response.json();
     const validCount = data.filter((item) => item.valid).length;

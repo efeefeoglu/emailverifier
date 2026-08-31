@@ -1,8 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EmailList(BaseModel):
-    emails: list[str]
+    emails: list[str] = Field(min_length=1, max_length=100)
 
 
 class EmailResult(BaseModel):

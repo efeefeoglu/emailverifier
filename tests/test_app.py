@@ -1,9 +1,14 @@
+import os
+
 import dns.resolver
 from fastapi.testclient import TestClient
 
-from app.main import app
+os.environ["API_KEYS"] = "test-key"
 
-client = TestClient(app)
+from app.main import app  # noqa: E402
+from app.security import require_api_key  # noqa: E402
+
+client = TestClient(app, headers={"X-API-Key": "test-key"})
 
 
 class FakeExchange:
@@ -39,6 +44,41 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_verify_requires_a_valid_api_key() -> None:
+    response = TestClient(app).post("/api/verify", json={"emails": ["a@b.com"]})
+    assert response.status_code == 401
+    response = TestClient(app).post(
+        "/api/verify",
+        headers={"X-API-Key": "wrong-key"},
+        json={"emails": ["a@b.com"]},
+    )
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "ApiKey"
+
+
+def test_verify_is_unavailable_when_no_keys_are_configured(monkeypatch) -> None:
+    monkeypatch.delenv("API_KEYS")
+    response = client.post("/api/verify", json={"emails": ["a@b.com"]})
+    assert response.status_code == 503
+
+
+def test_api_key_is_rate_limited(monkeypatch) -> None:
+    monkeypatch.setenv("API_RATE_LIMIT", "1")
+    require_api_key.reset()
+    first = client.post("/api/verify", json={"emails": ["invalid"]})
+    second = client.post("/api/verify", json={"emails": ["invalid"]})
+    assert first.status_code == 200
+    assert first.headers["x-ratelimit-remaining"] == "0"
+    assert second.status_code == 429
+    assert "retry-after" in second.headers
+    require_api_key.reset()
+
+
+def test_verify_rejects_oversized_batches() -> None:
+    response = client.post("/api/verify", json={"emails": ["invalid"] * 101})
+    assert response.status_code == 422
 
 
 def test_verify_returns_one_result_per_address(monkeypatch) -> None:
