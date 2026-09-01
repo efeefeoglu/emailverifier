@@ -253,6 +253,17 @@ def catch_all_probe_address(address: str) -> str:
     return f"email-verifier-{secrets.token_hex(16)}@{domain}"
 
 
+def mailbox_inconclusive(result: EmailResult) -> EmailResult:
+    """Mark an address invalid when SMTP cannot accept its mailbox."""
+    return result.model_copy(
+        update={
+            "valid": False,
+            "smtp_status": "recipient_inconclusive",
+            "reason": "The receiving mail server did not accept the recipient address.",
+        }
+    )
+
+
 def smtp_hosts(address: str) -> list[str]:
     """Resolve explicit MX hosts in preference order, or the implicit MX."""
     domain = address.rsplit("@", 1)[1].encode("idna").decode("ascii")
@@ -317,13 +328,7 @@ def check_smtp(result: EmailResult) -> EmailResult:
                             "reason": "The receiving mail server reports that this mailbox does not exist.",
                         }
                     )
-                return result.model_copy(
-                    update={
-                        "valid": False,
-                        "smtp_status": "recipient_inconclusive",
-                        "reason": "The receiving mail server did not accept the recipient address.",
-                    }
-                )
+                return mailbox_inconclusive(result)
         except (OSError, smtplib.SMTPException, socket.timeout):
             continue
     return result.model_copy(update={"smtp_status": last_status})
