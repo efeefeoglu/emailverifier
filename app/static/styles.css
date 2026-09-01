@@ -36,6 +36,7 @@ h1 { margin: .45rem 0 .75rem; font-size: clamp(2rem, 6vw, 3rem); }
 .intro { margin: 0 0 2rem; color: #5a6476; line-height: 1.6; }
 label { display: block; margin-bottom: .55rem; font-weight: 700; }
 
+input,
 textarea {
   display: block;
   width: 100%;
@@ -47,6 +48,8 @@ textarea {
   line-height: 1.6;
 }
 
+input { margin-bottom: 1rem; }
+input:focus,
 textarea:focus { outline: 3px solid #dce4ff; border-color: #3157d5; }
 
 button {

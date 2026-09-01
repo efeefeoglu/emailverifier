@@ -13,6 +13,8 @@
       <p class="intro">Enter one email address per line. We check its format, mail DNS, and—when configured—the recipient server's SMTP response without sending email.</p>
 
       <form id="verify-form">
+        <label for="api-key">API key</label>
+        <input id="api-key" type="password" autocomplete="off" required>
         <label for="emails">Email addresses</label>
         <textarea id="emails" rows="8" placeholder="jane@company.com&#10;john@@company.com" required></textarea>
         <button type="submit">Check addresses</button>

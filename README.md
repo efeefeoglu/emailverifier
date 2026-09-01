@@ -14,6 +14,19 @@ uvicorn app.main:app --reload
 ```
 
 Open <http://127.0.0.1:8000>. API documentation is available at `/docs`.
+The web form asks for the same API key and keeps it only in the page while it is
+open.
+
+The server verifies the key in `app/security.py`. Set the server's API key as an
+environment variable before starting the application:
+
+```bash
+export API_KEY="replace-with-a-long-random-secret"
+```
+
+For a deployed service, configure `API_KEY` through your platform's secret
+manager. Never commit the real key to this repository, put it in frontend
+JavaScript, or include it in a container image.
 
 ## API
 
@@ -24,11 +37,40 @@ responds with:
 {"status": "ok"}
 ```
 
-Send `POST /api/verify` with:
+Send `POST /api/verify` with the key in the `X-API-Key` header:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/verify \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: replace-with-a-long-random-secret' \
+  -d '{"emails":["jane@company.com","john@@company.com"]}'
+```
+
+The JSON body is:
 
 ```json
 {"emails": ["jane@company.com", "john@@company.com"]}
 ```
+
+The value supplied in `X-API-Key` must match `API_KEY`. If `API_KEY` is empty or
+unset, the endpoint fails closed with `503`; the homepage and health endpoint
+remain public. The API key is limited to 60 requests per 60-second window by
+default. Adjust this with `API_RATE_LIMIT` and
+`API_RATE_WINDOW_SECONDS`. Rate-limited requests return `429` and a
+`Retry-After` header. A request can contain 1–100 addresses, preventing a single
+request from consuming unbounded DNS and SMTP resources. The limiter is local
+to each application process, so multi-worker deployments should enforce a
+shared limit at the gateway as well.
+
+Browser apps hosted on another origin also need an explicit allowlist:
+
+```bash
+export CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+```
+
+Only listed origins can make cross-origin verification requests. Do not embed a
+long-lived secret in publicly distributed browser code; proxy requests through
+an application backend when the key must remain confidential.
 
 Before validation, the service removes common copy/paste formatting, trims
 whitespace, and normalizes domains (including internationalized domain names).
