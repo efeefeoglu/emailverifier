@@ -2,6 +2,7 @@ import os
 import secrets
 import time
 from collections import defaultdict, deque
+from hashlib import sha256
 from threading import Lock
 
 from fastapi import Header, HTTPException, Response, status
@@ -32,17 +33,13 @@ class APIKeyRateLimiter:
         response: Response,
         x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     ) -> str:
-        configured_keys = tuple(
-            key.strip() for key in os.getenv("API_KEYS", "").split(",") if key.strip()
-        )
-        if not configured_keys:
+        configured_key = os.getenv("API_KEY", "").strip()
+        if not configured_key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="API access is not configured.",
             )
-        if x_api_key is None or not any(
-            secrets.compare_digest(x_api_key, key) for key in configured_keys
-        ):
+        if x_api_key is None or not secrets.compare_digest(x_api_key, configured_key):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="A valid API key is required.",
@@ -53,7 +50,9 @@ class APIKeyRateLimiter:
         window = _positive_int("API_RATE_WINDOW_SECONDS", 60)
         now = time.monotonic()
         with self._lock:
-            requests = self._requests[x_api_key]
+            # Keep only a non-reversible key identifier in rate-limit state.
+            key_id = sha256(x_api_key.encode("utf-8")).hexdigest()
+            requests = self._requests[key_id]
             cutoff = now - window
             while requests and requests[0] <= cutoff:
                 requests.popleft()

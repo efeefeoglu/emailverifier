@@ -17,11 +17,16 @@ Open <http://127.0.0.1:8000>. API documentation is available at `/docs`.
 The web form asks for the same API key and keeps it only in the page while it is
 open.
 
-Set at least one API key before making verification requests:
+The server verifies the key in `app/security.py`. Set the server's API key as an
+environment variable before starting the application:
 
 ```bash
-export API_KEYS="replace-with-a-long-random-secret"
+export API_KEY="replace-with-a-long-random-secret"
 ```
+
+For a deployed service, configure `API_KEY` through your platform's secret
+manager. Never commit the real key to this repository, put it in frontend
+JavaScript, or include it in a container image.
 
 ## API
 
@@ -47,10 +52,10 @@ The JSON body is:
 {"emails": ["jane@company.com", "john@@company.com"]}
 ```
 
-`API_KEYS` accepts a comma-separated list, which permits key rotation without
-downtime. If it is unset, the verification endpoint fails closed with `503`;
-the homepage and health endpoint remain public. Each key is limited to 60
-requests per 60-second window by default. Adjust this with `API_RATE_LIMIT` and
+The value supplied in `X-API-Key` must match `API_KEY`. If `API_KEY` is empty or
+unset, the endpoint fails closed with `503`; the homepage and health endpoint
+remain public. The API key is limited to 60 requests per 60-second window by
+default. Adjust this with `API_RATE_LIMIT` and
 `API_RATE_WINDOW_SECONDS`. Rate-limited requests return `429` and a
 `Retry-After` header. A request can contain 1–100 addresses, preventing a single
 request from consuming unbounded DNS and SMTP resources. The limiter is local

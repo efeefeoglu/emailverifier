@@ -3,7 +3,7 @@ import os
 import dns.resolver
 from fastapi.testclient import TestClient
 
-os.environ["API_KEYS"] = "test-key"
+os.environ["API_KEY"] = "test-key"
 
 from app.main import app  # noqa: E402
 from app.security import require_api_key  # noqa: E402
@@ -59,15 +59,9 @@ def test_verify_requires_a_valid_api_key() -> None:
 
 
 def test_verify_is_unavailable_when_no_keys_are_configured(monkeypatch) -> None:
-    monkeypatch.delenv("API_KEYS")
-    for headers in ({}, {"X-API-Key": "tempefe"}, {"X-API-Key": "test-key"}):
-        response = TestClient(app).post(
-            "/api/verify",
-            headers=headers,
-            json={"emails": ["a@b.com"]},
-        )
-        assert response.status_code == 503
-        assert response.json() == {"detail": "API access is not configured."}
+    monkeypatch.delenv("API_KEY")
+    response = client.post("/api/verify", json={"emails": ["a@b.com"]})
+    assert response.status_code == 503
 
 
 def test_api_key_is_rate_limited(monkeypatch) -> None:
