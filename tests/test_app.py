@@ -466,3 +466,60 @@ def test_inconclusive_recipient_rejection_is_invalid(
     assert result["reason"] == (
         "The receiving mail server did not accept the recipient address."
     )
+
+
+def test_microsoft_365_inconclusive_recipient_is_invalid(monkeypatch) -> None:
+    """Keep the validity flag consistent with an inconclusive RCPT response."""
+
+    class InconclusiveMicrosoftSMTP(FakeSMTP):
+        def rcpt(self, recipient):
+            self.commands.append(("rcpt", recipient))
+            return 550, b"5.7.1 Service unavailable, client blocked"
+
+    monkeypatch.setattr(
+        "app.validators.dns.resolver.resolve",
+        lambda domain, rdtype: [
+            FakeMxRecord(0, "umefa-nl.mail.protection.outlook.com.")
+        ],
+    )
+    configure_smtp(monkeypatch)
+    monkeypatch.setattr(
+        "app.validators.smtplib.SMTP", InconclusiveMicrosoftSMTP
+    )
+
+    result = client.post(
+        "/api/verify", json={"emails": ["m.deblecourt@umefa.nl"]}
+    ).json()[0]
+
+    assert result == {
+        "original_email": "m.deblecourt@umefa.nl",
+        "email": "m.deblecourt@umefa.nl",
+        "valid": False,
+        "reason": "The receiving mail server did not accept the recipient address.",
+        "provider": "Microsoft 365",
+        "smtp_status": "recipient_inconclusive",
+    }
+
+
+def test_pipeline_never_returns_valid_with_recipient_inconclusive(monkeypatch) -> None:
+    """Enforce the public response invariant independently of SMTP internals."""
+
+    def inconsistent_smtp_result(result):
+        return result.model_copy(
+            update={"valid": True, "smtp_status": "recipient_inconclusive"}
+        )
+
+    monkeypatch.setattr(
+        "app.validators.OPERATIONS",
+        (inconsistent_smtp_result,),
+    )
+
+    result = client.post(
+        "/api/verify", json={"emails": ["m.deblecourt@umefa.nl"]}
+    ).json()[0]
+
+    assert result["valid"] is False
+    assert result["smtp_status"] == "recipient_inconclusive"
+    assert result["reason"] == (
+        "The receiving mail server did not accept the recipient address."
+    )
