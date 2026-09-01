@@ -264,6 +264,18 @@ def mailbox_inconclusive(result: EmailResult) -> EmailResult:
     )
 
 
+def enforce_smtp_result_consistency(result: EmailResult) -> EmailResult:
+    """Ensure an inconclusive recipient status can never be reported as valid.
+
+    Keep this invariant at the pipeline boundary as well as in the SMTP branch.
+    That prevents future SMTP handling changes from producing the contradictory
+    combination ``valid=true`` and ``smtp_status=recipient_inconclusive``.
+    """
+    if result.smtp_status != "recipient_inconclusive":
+        return result
+    return mailbox_inconclusive(result)
+
+
 def smtp_hosts(address: str) -> list[str]:
     """Resolve explicit MX hosts in preference order, or the implicit MX."""
     domain = address.rsplit("@", 1)[1].encode("idna").decode("ascii")
@@ -354,4 +366,4 @@ def process_email(address: str) -> EmailResult:
         result = operation(result)
         if not result.valid:
             break
-    return result
+    return enforce_smtp_result_consistency(result)
