@@ -1,6 +1,7 @@
 import os
 
 import dns.resolver
+import pytest
 from fastapi.testclient import TestClient
 
 os.environ["API_KEY"] = "test-key"
@@ -440,10 +441,19 @@ def test_smtp_550_511_marks_mailbox_as_not_found(monkeypatch) -> None:
     )
 
 
-def test_generic_recipient_policy_rejection_is_invalid(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (450, b"4.2.0 Mailbox temporarily unavailable"),
+        (550, b"5.7.1 Relay denied"),
+    ],
+)
+def test_inconclusive_recipient_rejection_is_invalid(
+    monkeypatch, code: int, message: bytes
+) -> None:
     class PolicyRejectingSMTP(FakeSMTP):
         def rcpt(self, recipient):
-            return 550, b"5.7.1 Relay denied"
+            return code, message
 
     existing_dns_domain(monkeypatch)
     configure_smtp(monkeypatch)
