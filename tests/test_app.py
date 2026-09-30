@@ -36,8 +36,7 @@ def existing_dns_domain(monkeypatch) -> None:
 def test_homepage() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Email Format Verifier" in response.text
-    assert 'id="result-summary"' in response.text
+    assert response.text == "hello universe\n"
 
 
 def test_health() -> None:

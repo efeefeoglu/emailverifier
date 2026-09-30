@@ -13,9 +13,8 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. API documentation is available at `/docs`.
-The web form asks for the same API key and keeps it only in the page while it is
-open.
+Open <http://127.0.0.1:8000> to see the minimal homepage. API documentation is
+available at `/docs`.
 
 The server verifies the key in `app/security.py`. Set the server's API key as an
 environment variable before starting the application:
