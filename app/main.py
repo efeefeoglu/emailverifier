@@ -34,6 +34,11 @@ def homepage() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/robots.txt", include_in_schema=False)
+def robots() -> FileResponse:
+    return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
