@@ -39,6 +39,14 @@ def test_homepage() -> None:
     assert response.text == "hello universe\n"
 
 
+def test_robots_txt_disallows_all_crawlers() -> None:
+    response = client.get("/robots.txt")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.text == "User-agent: *\nDisallow: /\n"
+
+
 def test_health() -> None:
     response = client.get("/health")
 
